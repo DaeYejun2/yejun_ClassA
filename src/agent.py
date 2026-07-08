@@ -34,6 +34,11 @@ EMBED_MODEL = "text-embedding-3-small"
 LLM_MODEL = "gpt-4o-mini"
 MAX_ITERATIONS = 8          # ReAct 루프 최대 tool-call 왕복 횟수 (웹검색 추가로 v2(6)에서 상향)
 HIGH_EVIDENCE_COUNT = 3
+# v5: 조기 기권(결정론적 가드레일) — 12장 실측에서 코퍼스 무관 쟁점이 8회를 모두 소진하며
+# 재검색만 반복하는 비효율(latency·토큰 약 2배)이 확인되어 추가. 아래 두 조건을 모두 시도하고도
+# 재검증 통과 사례가 누적 0건이고 웹 외부자료도 없으면, MAX_ITERATIONS를 기다리지 않고 즉시 기권 종료.
+EARLY_ABSTAIN_MIN_SEARCHES = 3   # vector_search_tool 최소 시도 횟수 (검색어 재구성 기회 보장)
+EARLY_ABSTAIN_MIN_RERANKS = 2    # relevance_reranker 최소 시도 횟수
 TRUSTED_WEB_DOMAINS = ["fss.or.kr", "law.go.kr", "kiri.or.kr"]  # 웹검색 허용 도메인 (금감원/법령정보센터/보험연구원)
 
 # 12장 token cost 지표용 단가 (2026-07 기준 gpt-4o-mini / text-embedding-3-small, USD per token)
@@ -243,9 +248,13 @@ class ToolContext:
         self.chat_input_tokens: int = 0
         self.chat_output_tokens: int = 0
         self.embedding_tokens: int = 0
+        # --- v5 조기 기권 가드레일용 시도 카운터 ---
+        self.search_count: int = 0                             # vector_search_tool 호출 횟수
+        self.rerank_count: int = 0                             # relevance_reranker 호출 횟수
 
 
 def exec_vector_search_tool(ctx: ToolContext, query: str, top_k: int = 5) -> Dict[str, Any]:
+    ctx.search_count += 1                                # v5 조기 기권 가드레일용
     client = get_client()
     emb_resp = client.embeddings.create(model=EMBED_MODEL, input=[query])
     ctx.embedding_tokens += emb_resp.usage.total_tokens  # 12장 token cost 지표용
@@ -281,6 +290,7 @@ def exec_vector_search_tool(ctx: ToolContext, query: str, top_k: int = 5) -> Dic
 
 
 def exec_relevance_reranker(ctx: ToolContext, issue: str, candidate_case_ids: List[str]) -> Dict[str, Any]:
+    ctx.rerank_count += 1                                # v5 조기 기권 가드레일용
     candidates = [ctx.seen_cases[cid] for cid in candidate_case_ids if cid in ctx.seen_cases]
     if not candidates:
         return {"relevant_case_ids": []}
@@ -400,6 +410,7 @@ def react_node(state: AgentState) -> AgentState:
     ]
 
     final_args: Optional[Dict[str, Any]] = None
+    early_abstain = False                                # v5 조기 기권 가드레일
 
     for step in range(MAX_ITERATIONS):
         resp = client.chat.completions.create(
@@ -450,9 +461,34 @@ def react_node(state: AgentState) -> AgentState:
         if stop:
             break
 
+        # --- v5 조기 기권 (결정론적 가드레일, LLM 재량 밖) ---
+        # 검색어를 바꿔가며 충분히 시도했는데도 관련성 재검증 통과 사례가 누적 0건이고
+        # 웹 외부자료도 없으면, 남은 반복은 재검색만 반복될 뿐이므로 즉시 기권 종료한다.
+        if (ctx.search_count >= EARLY_ABSTAIN_MIN_SEARCHES
+                and ctx.rerank_count >= EARLY_ABSTAIN_MIN_RERANKS
+                and not ctx.reranked_relevant
+                and not ctx.web_sources):
+            early_abstain = True
+            ctx.trace.append({
+                "step": step, "tool": "early_abstain_guardrail",
+                "arguments": {"search_count": ctx.search_count, "rerank_count": ctx.rerank_count,
+                              "reranked_relevant": 0},
+                "result": {"action": "루프 조기 종료",
+                           "reason": f"검색 {ctx.search_count}회·재검증 {ctx.rerank_count}회 시도에도 관련 사례 0건 — 코퍼스 커버리지 밖 쟁점으로 판단"},
+            })
+            break
+
     react_latency = time.monotonic() - t_start   # 12장 avg latency 지표용
 
     if final_args is None:
+        if early_abstain:
+            abstain_draft = (
+                f"코퍼스에서 관련 분쟁조정사례를 찾지 못해 조기 기권합니다"
+                f" (검색 {ctx.search_count}회 · 관련성 재검증 {ctx.rerank_count}회 시도, 통과 0건)."
+                " 해당 쟁점은 현재 판례 코퍼스의 커버리지 밖으로 판단되며, 사람의 직접 판단이 필요합니다. (참고자료입니다)"
+            )
+        else:
+            abstain_draft = "판단 루프가 최대 반복 횟수 내에 결론을 내지 못했습니다. 사람의 직접 판단이 필요합니다. (참고자료입니다)"
         return {
             "extracted_issue": state["input_query"],
             "retrieved_cases": list(ctx.seen_cases.values()),
@@ -460,7 +496,7 @@ def react_node(state: AgentState) -> AgentState:
             "external_references": ctx.web_sources,
             "tool_call_trace": ctx.trace,
             "evidence_strength": "LOW",
-            "draft_opinion": "판단 루프가 최대 반복 횟수 내에 결론을 내지 못했습니다. 사람의 직접 판단이 필요합니다. (참고자료입니다)",
+            "draft_opinion": abstain_draft,
             "recommendation": "ADDITIONAL_REVIEW_NEEDED",
             # --- 12장 평가지표용 ---
             "loop_completed": False,
