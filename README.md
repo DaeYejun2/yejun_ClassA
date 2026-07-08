@@ -86,7 +86,7 @@ psql -h localhost -U claimprecedent -d claimprecedent -f src/metrics.sql
 ## 실측 결과 요약 (총 40회 실행, 자체 테스트 기준)
 
 정확도(Precision) 0.80 · 환각 인용 0% · Task 달성률 82.6%(미완료는 전부 코퍼스 무관 쟁점의 기권) · 평균 latency 10.7초 · 케이스당 비용 약 $0.0018 · HITL 개입률 97.5% · Human override 7.5%
-상세 정의·해석은 보고서 12장, 대표 실행 사례 3종(정상 인용 / 오류 방어 / 정직한 기권)은 `docs/데모_시나리오.md` 참조.
+상세 정의·해석은 보고서 12장, 대표 실행 사례 3종(정상 인용 / 오류 방어 / 정직한 기권)은 `ClaimPrecedent 데모 시나리오.docx` 참조.
 
 ## 데이터 출처
 
