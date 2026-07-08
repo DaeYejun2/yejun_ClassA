@@ -22,7 +22,7 @@
 | 최종 보고서 | `AI_Agent_설계_및_활용_최종.docx` |
 | 발표자료 | `발표자료_ClaimPrecedent.pptx` |
 | AI Agent 설계도 | `업무 흐름도 및 아키텍처 다이어그램.pdf` |
-| 프로토타입 / 데모 시나리오 | `src/` 전체 코드 + `docs/데모_시나리오.md` |
+| 프로토타입 / 데모 시나리오 | `src/` 전체 코드 + `ClaimPrecedent 데모 시나리오.docx` |
 | 참고문헌 및 출처 | `참고문헌 및 출처 목록.docx` |
 
 ## 저장소 구성
@@ -92,6 +92,3 @@ psql -h localhost -U claimprecedent -d claimprecedent -f src/metrics.sql
 
 `data/fss_dispute_cases.csv`는 금융감독원 통합 홈페이지 분쟁조정사례 게시판(fss.or.kr)에서 크롤링한 공개 자료입니다. 금감원이 익명 처리하여 공개한 사례로 개인 식별 정보를 포함하지 않으며, 본 과제의 학술 목적 범위에서 사용합니다.
 
-## 데이터 출처
-
-`data/fss_dispute_cases.csv`는 금융감독원 통합 홈페이지 분쟁조정사례 게시판(fss.or.kr)에서 크롤링한 공개 자료입니다. 금감원이 익명 처리하여 공개한 사례로 개인 식별 정보를 포함하지 않으며, 본 과제의 학술 목적 범위에서 사용합니다.
