@@ -3,7 +3,7 @@
 ClaimPrecedent 심사역 UI — Streamlit 데모
 아키텍처 1계층(심사역 UI)의 실물 구현: 질의 입력 → tool 이력 → 판례 카드 → HITL 승인 게이트
 
-실행 (주의: 8501은 동일 VM의 EDA 대시보드가 사용 중이므로 8502 사용):
+실행 (8502 사용):
     streamlit run app_ui.py --server.port 8502 --server.address 127.0.0.1 --server.headless true
 접속 (기본 — SSH 터널, 본인만):
     ssh -L 8502:localhost:8502 opc@<VM_IP>  →  브라우저에서 http://localhost:8502
@@ -56,6 +56,7 @@ def get_app():
 
 
 def init_state():
+# Streamlit 세션 상태 초기화. phase: idle(입력 대기) → awaiting_hitl(승인 대기) → done.
     ss = st.session_state
     ss.setdefault("phase", "idle")          # idle | awaiting_hitl | done
     ss.setdefault("result", None)
@@ -65,6 +66,7 @@ def init_state():
 
 
 def run_agent(query: str, product_type: str):
+# 그래프 실행. HITL 발동 시 interrupt payload를 보관하고 phase를 awaiting_hitl로 전환.
     ss = st.session_state
     ss.thread_id = f"ui-{uuid.uuid4().hex[:8]}"
     config = {"configurable": {"thread_id": ss.thread_id}}
@@ -82,6 +84,8 @@ def run_agent(query: str, product_type: str):
 
 
 def resume_agent(decision: str, note: str):
+    """심사역 판정(ACCEPT/MODIFY/REJECT)으로 중단된 그래프를 재개 — 같은 thread_id의
+    checkpointer 상태에서 이어 실행되고 감사로그가 저장된다."""
     ss = st.session_state
     config = {"configurable": {"thread_id": ss.thread_id}}
     with st.spinner("심사역 결정을 반영하고 감사로그를 저장하는 중..."):
@@ -90,6 +94,7 @@ def resume_agent(decision: str, note: str):
 
 
 def render_trace(result):
+    """tool 호출 이력 표시 (조기 기권 가드레일 발동은 🛑 아이콘으로 구분)."""
     trace = result.get("tool_call_trace", [])
     with st.expander(f"🔧 Agent tool 호출 이력 — 자율 ReAct 루프 ({len(trace)}회)", expanded=False):
         for i, t in enumerate(trace, 1):
@@ -100,6 +105,7 @@ def render_trace(result):
 
 
 def render_cases(result):
+    """인용 판례 카드: 쟁점·처리결과 원문을 펼쳐볼 수 있어 심사역 판정의 근거가 된다."""
     cases = result.get("filtered_cases", [])
     if not cases:
         st.info("인용된 판례 없음 — 코퍼스 커버리지 밖 쟁점 (기권)")
@@ -115,6 +121,7 @@ def render_cases(result):
 
 
 def render_opinion(result):
+    """근거강도 배지 + AI 추천 + 참고의견 + 외부자료(구분 표시) 렌더링."""
     strength = result.get("evidence_strength", "LOW")
     rec = result.get("recommendation", "ADDITIONAL_REVIEW_NEEDED")
     c1, c2, c3 = st.columns([1.2, 2, 1.5])
